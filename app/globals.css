@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-navy: #1e3a8a;
+  --color-brand-turquoise: #06b6d4;
+  --color-brand-amber: #f59e0b;
+  --color-brand-rose: #e11d48;
+
+  --color-surface: #ffffff;
+  --color-surface-muted: #f1f5f9;
+
+  --color-ink: #0f172a;
+  --color-ink-muted: #475569;
+  --color-ink-subtle: #64748b;
+
+  --color-line: #e2e8f0;
+  --color-line-strong: #cbd5e1;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  background:
+    radial-gradient(
+      1200px 600px at 10% -10%,
+      color-mix(in oklab, var(--color-brand-rose) 10%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      900px 500px at 110% 10%,
+      color-mix(in oklab, var(--color-brand-navy) 8%, transparent),
+      transparent 55%
+    ),
+    linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+  min-height: 100vh;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    color: #e2e8f0;
+    background:
+      radial-gradient(
+        1200px 600px at 10% -10%,
+        color-mix(in oklab, var(--color-brand-rose) 18%, transparent),
+        transparent 60%
+      ),
+      radial-gradient(
+        900px 500px at 110% 10%,
+        color-mix(in oklab, var(--color-brand-navy) 24%, transparent),
+        transparent 55%
+      ),
+      linear-gradient(180deg, #0b1220 0%, #0a0f1b 100%);
+  }
+}

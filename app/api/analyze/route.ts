@@ -1,5 +1,5 @@
 import "server-only";
-import { generateObject } from "ai";
+import { generateText } from "ai";
 import { groq } from "@ai-sdk/groq";
 import { z } from "zod";
 import { rateLimit } from "@/lib/rate-limit";
@@ -109,25 +109,78 @@ export async function POST(req: Request) {
     body.candidateName ? `Adayın adı: ${body.candidateName}.` : "Adayın adı CV'den çıkarılacak.",
   ].join(" ");
 
-  const prompt = `=== CV ===\n${body.cvText}\n\n=== İŞ İLANI ===\n${body.jobText}\n\nTüm analizi JSON şemasına uygun döndür. improvedCv.header.fullName CV'den çıkarılacak gerçek isim olmalı; CV'de isim yoksa "Aday" yaz.`;
+  // Groq gpt-oss-120b'nin generateObject yolu karmaşık nested şemalarda
+  // NoObjectGeneratedError/JSON parse ile 502 atıyordu (ana sitedeki slayt
+  // fix'inin aynısı). generateText + manual JSON.parse + safeParse yoluna
+  // geçildi.
+  const prompt = `=== CV ===\n${body.cvText}\n\n=== İŞ İLANI ===\n${body.jobText}\n\nAşağıdaki JSON şemasına birebir uyan tek bir JSON döndür. Başka hiçbir metin ekleme, kod bloğu kullanma.\n\nŞema (TypeScript):\n${CV_SCHEMA_HINT}\n\nimprovedCv.header.fullName CV'den çıkarılacak gerçek isim olmalı; CV'de isim yoksa "Aday" yaz.`;
 
+  let raw: string;
   try {
-    const { object } = await generateObject({
+    const { text } = await generateText({
       model: groq("openai/gpt-oss-120b"),
-      schema: CvAnalysisSchema,
       system,
       prompt,
       temperature: 0.3,
     });
-    return json(object);
+    raw = text;
   } catch (err) {
-    console.error("[cv-koc] failed:", err);
+    console.error("[cv-koc] generateText failed:", err);
     return json(
       { error: "Analiz üretilemedi. Lütfen biraz sonra tekrar dene." },
       502,
     );
   }
+
+  const jsonText = extractJson(raw);
+  if (!jsonText) {
+    console.error("[cv-koc] no JSON in output:", raw.slice(0, 400));
+    return json({ error: "Analiz formatı beklenmedik. Tekrar dene." }, 422);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch (err) {
+    console.error("[cv-koc] JSON parse failed:", err, raw.slice(0, 400));
+    return json({ error: "Analiz formatı beklenmedik. Tekrar dene." }, 422);
+  }
+  const result = CvAnalysisSchema.safeParse(parsed);
+  if (!result.success) {
+    console.error("[cv-koc] schema mismatch:", result.error.issues.slice(0, 3));
+    return json({ error: "Analiz formatı beklenmedik. Tekrar dene." }, 422);
+  }
+  return json(result.data);
 }
+
+function extractJson(text: string): string | null {
+  const trimmed = text.trim();
+  // Try to peel optional code fences
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) return fenced[1].trim();
+  // Fallback: first { to last }
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start < 0 || end < 0 || end <= start) return null;
+  return trimmed.slice(start, end + 1);
+}
+
+const CV_SCHEMA_HINT = `{
+  fitScore: { score: number(0-100), verdict: "dusuk"|"orta"|"iyi"|"guclu"|"mukemmel", summary: string },
+  matchedKeywords: string[] (max 30),
+  missingKeywords: string[] (max 30),
+  strengths: string[] (2-8),
+  gaps: { area, why, howToClose }[] (max 8),
+  improvedCv: {
+    header: { fullName, title, contactLine },
+    summary: string,
+    skills: string[] (4-20),
+    experience: { role, company, period, bullets: string[] (1-6) }[] (max 10),
+    education: { degree, institution, period }[] (max 6),
+    certifications?: string[] (max 8)
+  },
+  coverLetter: { greeting, body: string[] (2-5), closing },
+  thirtySixtyNinety: { thirty: string[] (2-6), sixty: string[] (2-6), ninety: string[] (2-6) }
+}`;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
